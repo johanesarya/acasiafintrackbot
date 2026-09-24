@@ -12,7 +12,7 @@ app = FastAPI()
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-def send_telegram_msg(chat_id, text, parse_mode=None):
+def send_telegram_msg(chat_id: int, text: str, parse_mode: str = None):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": text}
     if parse_mode:
@@ -22,14 +22,13 @@ def send_telegram_msg(chat_id, text, parse_mode=None):
     except Exception as e:
         print("Gagal kirim pesan telegram:", e)
 
-@app.get("/")
-@app.get("/api/index")
-async def health_check():
-    return {"status": "ok", "message": "Bot webhook is running"}
+@app.api_route("/{full_path:path}", methods=["GET", "POST"])
+async def catch_all_webhook(request: Request, full_path: str):
+    # Jika diakses lewat browser (GET)
+    if request.method == "GET":
+        return {"status": "ok", "path": full_path, "message": "Bot webhook is active"}
 
-@app.post("/")
-@app.post("/api/index")
-async def telegram_webhook(request: Request):
+    # Jika menerima update dari Telegram (POST)
     try:
         data = await request.json()
     except Exception:
@@ -75,11 +74,12 @@ async def telegram_webhook(request: Request):
 
         if user_text.startswith("/start"):
             send_telegram_msg(
-                chat_id, 
+                chat_id,
                 "Halo! Kirim catatan pengeluaran/pemasukan lewat chat atau kirim foto struk belanja untuk dicatat."
             )
             return {"ok": True}
 
+        # Pertanyaan / Rekap Keuangan
         query_keywords = ["berapa", "total", "cek", "sisa", "apakah", "rekap"]
         if any(kw in user_text.lower() for kw in query_keywords) and "?" in user_text:
             send_telegram_msg(chat_id, "Sedang menganalisis catatanmu...")
@@ -91,7 +91,7 @@ async def telegram_webhook(request: Request):
                 send_telegram_msg(chat_id, f"Gagal mengambil ringkasan: {str(e)}")
             return {"ok": True}
 
-        # Transaksi Biasa
+        # Pencatatan Transaksi Biasa
         send_telegram_msg(chat_id, "Mencatat transaksi...")
         try:
             parsed = parse_with_gemini(user_text)
