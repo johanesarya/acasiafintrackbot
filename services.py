@@ -4,6 +4,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from google.genai.errors import APIError
 from supabase import create_client, Client
 from PIL import Image
 from schemas import ParsedFinanceResponse
@@ -13,6 +14,8 @@ load_dotenv()
 # Inisialisasi Clients
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+DEFAULT_MODEL = "gemini-2.5-flash"
 
 SYSTEM_PROMPT = """
 Kamu adalah sistem AI penasihat finansial pribadi bernama "Acasia". Karaktermu adalah seorang profesional berlatar belakang gabungan Akuntansi & Sistem Informasi/Teknologi yang kritis, pragmatis, direct (langsung pada intinya), cerdas, dan tidak suka basa-basi manis.
@@ -35,20 +38,34 @@ Tugas Ekstraksi & Struktur Data:
 5. Tulis roast_comment sesuai aturan persona di atas ke dalam field JSON yang diminta.
 """
 
+
 def parse_with_gemini(content: str | Image.Image) -> ParsedFinanceResponse:
-    contents = [content] if isinstance(content, Image.Image) else [content]
-    
-    response = gemini_client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=contents,
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
-            response_mime_type="application/json",
-            response_schema=ParsedFinanceResponse,
-            temperature=0.2,
-        ),
-    )
-    return ParsedFinanceResponse.model_validate_json(response.text)
+    contents = [content]
+
+    try:
+        response = gemini_client.models.generate_content(
+            model=DEFAULT_MODEL,
+            contents=contents,
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT,
+                response_mime_type="application/json",
+                response_schema=ParsedFinanceResponse,
+                temperature=0.2,
+            ),
+        )
+        return ParsedFinanceResponse.model_validate_json(response.text)
+    except APIError as e:
+        print(f"[Gemini API Error] status={getattr(e, 'code', '?')} msg={e}")
+        err_str = str(e).lower()
+        if "429" in err_str or "quota" in err_str or "rate" in err_str:
+            raise RuntimeError("AI sedang mencapai batas laju pemrosesan. Coba kirim ulang pesan dalam 30 detik.")
+        if "404" in err_str or "not found" in err_str:
+            raise RuntimeError(f"Model AI tidak tersedia ({DEFAULT_MODEL}). Update DEFAULT_MODEL di services.py.")
+        raise RuntimeError(f"Gemini API error: {e}")
+    except Exception as e:
+        print(f"[Unexpected Parsing Error] {e}")
+        raise RuntimeError(f"Gagal memproses transaksi finansial: {str(e)[:200]}")
+
 
 def save_transactions_to_db(parsed_data: ParsedFinanceResponse, raw_source: str) -> None:
     rows = []
@@ -66,10 +83,9 @@ def save_transactions_to_db(parsed_data: ParsedFinanceResponse, raw_source: str)
             "notes": parsed_data.roast_comment
         })
 
-        # Cek apakah item ditandai sebagai tabungan/investasi
         is_saving = getattr(item, 'is_savings_or_investment', False)
         item_text = f"{item.item_name} {item.category}".lower()
-        
+
         if is_saving or any(kw in item_text for kw in savings_keywords):
             total_new_savings += item.amount
 
@@ -82,7 +98,7 @@ def save_transactions_to_db(parsed_data: ParsedFinanceResponse, raw_source: str)
         try:
             current_month_str = datetime.now().strftime("%Y-%m-01")
             res = supabase.table("monthly_balances").select("liquid_assets").eq("month_year", current_month_str).execute()
-            
+
             current_liquid = 0
             if res.data and len(res.data) > 0:
                 current_liquid = float(res.data[0].get("liquid_assets") or 0)
@@ -100,10 +116,11 @@ def save_transactions_to_db(parsed_data: ParsedFinanceResponse, raw_source: str)
         except Exception as err:
             print("Gagal mengupdate saldo kas likuid otomatis:", err)
 
+
 def query_financial_summary(user_query: str) -> str:
     res = supabase.table("transactions").select("*").order("created_at", desc=True).limit(50).execute()
     history = res.data or []
-    
+
     prompt = f"""
     Pengguna bertanya: "{user_query}"
     Berikut data transaksi terakhir pengguna (JSON):
@@ -111,8 +128,12 @@ def query_financial_summary(user_query: str) -> str:
 
     Jawablah pertanyaan pengguna dengan ringkas, akurat sesuai data di atas, dan pertahankan nada persona finansialmu.
     """
-    response = gemini_client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt
-    )
-    return response.text
+    try:
+        response = gemini_client.models.generate_content(
+            model=DEFAULT_MODEL,
+            contents=prompt
+        )
+        return response.text
+    except Exception as e:
+        print(f"[Gemini Summary Error] {e}")
+        return "Sistem analitik sedang sibuk merefresh database. Silakan coba lagi beberapa saat lagi."
