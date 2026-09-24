@@ -15,8 +15,8 @@ load_dotenv()
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
-# Gunakan gemini-1.5-flash untuk kuota harian besar (1.500 RPD) pada free tier
-DEFAULT_MODEL = "gemini-1.5-flash"
+# Ubah DEFAULT_MODEL menjadi salah satu opsi di bawah:
+DEFAULT_MODEL = "gemini-1.5-flash-latest"
 
 SYSTEM_PROMPT = """
 Kamu adalah sistem AI penasihat finansial pribadi bernama "Acasia". Karaktermu adalah seorang profesional berlatar belakang gabungan Akuntansi & Sistem Informasi/Teknologi yang kritis, pragmatis, direct (langsung pada intinya), cerdas, dan tidak suka basa-basi manis.
