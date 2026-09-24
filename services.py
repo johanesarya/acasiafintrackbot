@@ -39,7 +39,7 @@ def parse_with_gemini(content: str | Image.Image) -> ParsedFinanceResponse:
     contents = [content] if isinstance(content, Image.Image) else [content]
     
     response = gemini_client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",
         contents=contents,
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,
@@ -112,7 +112,7 @@ def query_financial_summary(user_query: str) -> str:
     Jawablah pertanyaan pengguna dengan ringkas, akurat sesuai data di atas, dan pertahankan nada persona finansialmu.
     """
     response = gemini_client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",
         contents=prompt
     )
     return response.text
