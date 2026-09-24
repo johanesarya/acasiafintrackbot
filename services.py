@@ -4,7 +4,6 @@ from datetime import datetime
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
-from google.genai.errors import APIError
 from supabase import create_client, Client
 from PIL import Image
 from schemas import ParsedFinanceResponse
@@ -14,9 +13,6 @@ load_dotenv()
 # Inisialisasi Clients
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-
-# Ubah DEFAULT_MODEL menjadi salah satu opsi di bawah:
-DEFAULT_MODEL = "gemini-1.5-flash-latest"
 
 SYSTEM_PROMPT = """
 Kamu adalah sistem AI penasihat finansial pribadi bernama "Acasia". Karaktermu adalah seorang profesional berlatar belakang gabungan Akuntansi & Sistem Informasi/Teknologi yang kritis, pragmatis, direct (langsung pada intinya), cerdas, dan tidak suka basa-basi manis.
@@ -42,25 +38,17 @@ Tugas Ekstraksi & Struktur Data:
 def parse_with_gemini(content: str | Image.Image) -> ParsedFinanceResponse:
     contents = [content] if isinstance(content, Image.Image) else [content]
     
-    try:
-        response = gemini_client.models.generate_content(
-            model=DEFAULT_MODEL,
-            contents=contents,
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                response_mime_type="application/json",
-                response_schema=ParsedFinanceResponse,
-                temperature=0.2,
-            ),
-        )
-        return ParsedFinanceResponse.model_validate_json(response.text)
-    except APIError as e:
-        print(f"[Gemini API Error] {e}")
-        # Fallback jika terjadi rate limit / kuota habis, agar bot tidak melempar error mentah
-        raise RuntimeError("AI sedang mencapai batas laju pemrosesan. Coba kirim ulang pesan dalam 30 detik.")
-    except Exception as e:
-        print(f"[Unexpected Parsing Error] {e}")
-        raise RuntimeError("Gagal memproses transaksi finansial. Pastikan format teks atau foto terbaca jelas.")
+    response = gemini_client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=contents,
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            response_mime_type="application/json",
+            response_schema=ParsedFinanceResponse,
+            temperature=0.2,
+        ),
+    )
+    return ParsedFinanceResponse.model_validate_json(response.text)
 
 def save_transactions_to_db(parsed_data: ParsedFinanceResponse, raw_source: str) -> None:
     rows = []
@@ -78,6 +66,7 @@ def save_transactions_to_db(parsed_data: ParsedFinanceResponse, raw_source: str)
             "notes": parsed_data.roast_comment
         })
 
+        # Cek apakah item ditandai sebagai tabungan/investasi
         is_saving = getattr(item, 'is_savings_or_investment', False)
         item_text = f"{item.item_name} {item.category}".lower()
         
@@ -122,12 +111,8 @@ def query_financial_summary(user_query: str) -> str:
 
     Jawablah pertanyaan pengguna dengan ringkas, akurat sesuai data di atas, dan pertahankan nada persona finansialmu.
     """
-    try:
-        response = gemini_client.models.generate_content(
-            model=DEFAULT_MODEL,
-            contents=prompt
-        )
-        return response.text
-    except Exception as e:
-        print(f"[Gemini Summary Error] {e}")
-        return "Sistem analitik sedang sibuk merefresh database. Silakan coba lagi beberapa saat lagi."
+    response = gemini_client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt
+    )
+    return response.text
