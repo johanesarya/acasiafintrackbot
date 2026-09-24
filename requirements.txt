@@ -1,6 +1,9 @@
-python-telegram-bot[job-queue]==21.10
+python-telegram-bot
 google-genai
 supabase
 pydantic
-python-dotenv
 pillow
+python-dotenv
+fastapi
+uvicorn
+requests
